@@ -120,7 +120,6 @@ train_set <- edx %>% slice(-test_index)
 # genres to seperate columns? to list like starwars tibble? 
 # add column that shows total number of ratings, this can be a metric as well
 ### hypothesis = if movie is in a "serious" genre, larger time span for ratings, and has more ratings it is more likely to have higher rating
-# examine this as an example https://rstudio-pubs-static.s3.amazonaws.com/465926_4c1ea901de9f4ce6a1969175080d6cc9.html
 # 25 points: RMSE < 0.86490
 
 train_glm <- train(rating ~ factor(genres) + factor(), method = "glm", data = train_set[1:1000,])
