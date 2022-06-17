@@ -12,7 +12,7 @@ library(data.table)
 # > https://grouplens.org/datasets/movielens/10m/
 # > http://files.grouplens.org/datasets/movielens/ml-10m.zip
 
-# Download the zipped file, unzip, and load both ratins and movies data
+# Download the zipped file, unzip, and load both ratings and movies data
 dl <- tempfile()
 download.file("https://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
 
@@ -74,13 +74,50 @@ user_add <- edx_5K %>%
   group_by(userId) %>% 
   summarize(avg_user_rating = mean(rating))
 
+# Find average rating by individual genre
+genre_add <- edx_5K %>%
+  mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
+  as_tibble() %>%
+  select(rating, genre_rating) %>%
+  unnest(genre_rating) %>%
+  group_by(genre_rating) %>%
+  summarize(avg_genre_rating = mean(rating))
+
+genre_add %>%
+  mutate(genre_rating = fct_reorder(genre_rating, avg_genre_rating)) %>%
+  ggplot(aes(x = avg_genre_rating, y = genre_rating)) +
+  geom_col(fill = "lightblue", alpha = 0.9) +
+  labs(y = "Genre", 
+       x = "Average Rating",
+       title = "Average Rating by Genre") +
+  theme_classic() +
+  scale_x_continuous(limits = c(0, 5), 
+                     breaks = 0:5,
+                     labels = 0:5) +
+  theme(panel.grid.major.x = element_line(linetype = "dashed", color = "gray"))
+
+### Redo this part with full data set and choose top genres...
+top_genres <- c("Film-Noir", "IMAX", "Mystery", "War", "Musical", "Crime", "Drama", "Documentary")
+
+edx_5K %>%
+  mutate(top_genres_n = map_int(genres, 
+                            function(x){
+                              sum(str_detect(x, top_genres))
+                              }
+                            )) %>%
+  group_by(top_genres_n) %>%
+  summarize(avg_rating = mean(rating)) %>%
+  ggplot(aes(top_genres_n, avg_rating)) +
+  geom_col()
+
+
 # Combine all new fields
 edx_5K <- left_join(edx_5K, movie_add, by = "movieId") 
 edx_5K <- left_join(edx_5K, user_add, by = "userId")
 
 
-head(edx_5K)
-
+# Examine correlation of all variables using a corrplot
+# We can see that average movie rating, average user rating, rating month, and number of ratings have the largest positive correlation with rating
 corrplot::corrplot(edx_5K %>%
                      select(rating, rating_year, rating_month, rating_gap, release_year, 
                             movie_age, n_ratings, avg_movie_rating, avg_user_rating) %>%
