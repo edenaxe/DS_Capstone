@@ -8,6 +8,8 @@ library(tidyverse)
 library(caret)
 library(data.table)
 
+
+
 # MovieLens 10M dataset:
 # > https://grouplens.org/datasets/movielens/10m/
 # > http://files.grouplens.org/datasets/movielens/ml-10m.zip
@@ -50,78 +52,7 @@ edx <- rbind(edx, removed)
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
 
-# Further cleaning on the edx data set - USING A SUBSET OF EDX DATA SET FOR TESTING PURPOSES
-edx_5K <- edx[1:5000,] %>%
-  # Use timestamp column to define the date, year, and month
-  mutate(rating_date = lubridate::as_datetime(timestamp),
-         rating_year = lubridate::year(rating_date), 
-         rating_month = lubridate::month(rating_date),
-         release_year = as.double(gsub("[\\(\\)]", "", regmatches(title, gregexpr("\\(.*?\\)", title))[[1]])),
-         rating_gap = rating_year-release_year,
-         movie_age = 2022-release_year)
 
-
-
-
-# To find total number of ratings and average movie rating for each movie
-movie_add <- edx_5K %>% 
-  group_by(movieId) %>% 
-  summarize(n_ratings = n(),
-            avg_movie_rating = mean(rating))
-
-# To find each user's average given rating
-user_add <- edx_5K %>% 
-  group_by(userId) %>% 
-  summarize(avg_user_rating = mean(rating))
-
-# Find average rating by individual genre
-genre_add <- edx_5K %>%
-  mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
-  as_tibble() %>%
-  select(rating, genre_rating) %>%
-  unnest(genre_rating) %>%
-  group_by(genre_rating) %>%
-  summarize(avg_genre_rating = mean(rating))
-
-genre_add %>%
-  mutate(genre_rating = fct_reorder(genre_rating, avg_genre_rating)) %>%
-  ggplot(aes(x = avg_genre_rating, y = genre_rating)) +
-  geom_col(fill = "lightblue", alpha = 0.9) +
-  labs(y = "Genre", 
-       x = "Average Rating",
-       title = "Average Rating by Genre") +
-  theme_classic() +
-  scale_x_continuous(limits = c(0, 5), 
-                     breaks = 0:5,
-                     labels = 0:5) +
-  theme(panel.grid.major.x = element_line(linetype = "dashed", color = "gray"))
-
-### Redo this part with full data set and choose top genres...
-top_genres <- c("Film-Noir", "IMAX", "Mystery", "War", "Musical", "Crime", "Drama", "Documentary")
-
-edx_5K %>%
-  mutate(top_genres_n = map_int(genres, 
-                            function(x){
-                              sum(str_detect(x, top_genres))
-                              }
-                            )) %>%
-  group_by(top_genres_n) %>%
-  summarize(avg_rating = mean(rating)) %>%
-  ggplot(aes(top_genres_n, avg_rating)) +
-  geom_col()
-
-
-# Combine all new fields
-edx_5K <- left_join(edx_5K, movie_add, by = "movieId") 
-edx_5K <- left_join(edx_5K, user_add, by = "userId")
-
-
-# Examine correlation of all variables using a corrplot
-# We can see that average movie rating, average user rating, rating month, and number of ratings have the largest positive correlation with rating
-corrplot::corrplot(edx_5K %>%
-                     select(rating, rating_year, rating_month, rating_gap, release_year, 
-                            movie_age, n_ratings, avg_movie_rating, avg_user_rating) %>%
-                     cor())
 
 
 ######################################
@@ -131,6 +62,12 @@ corrplot::corrplot(edx_5K %>%
 # This section describes the data set and summarizes the goal of the project and key steps that were performed
 
 # Basic premise is to train a machine learning algorithm using the inputs in one subset to predict movie ratings in the validation set
+
+# Basic premise is: 
+# - use my own variables to generate a model on the 
+# - use average movie rating + averag user rating + rating month, 
+# - use Metrics::rmse(validation$rating, predicted values)
+# - adjust until RMSE is below threshold for full points
 
 
 #################################
@@ -147,8 +84,69 @@ set.seed(92, sample.kind = "Rounding")
 test_index <- createDataPartition(edx$rating, times = 1, p = 0.2, list = FALSE)
 test_set <- edx %>% slice(test_index)
 train_set <- edx %>% slice(-test_index)
+rm(test_index, edx)
 
 
+
+### TEST AREA ###
+
+
+# Further cleaning on the edx data set, adding variables for creating the model
+train_set <- train_set %>%
+  # Use timestamp column to define the date and year
+  mutate(rating_date = lubridate::as_datetime(timestamp),
+         rating_year = lubridate::year(rating_date), 
+         release_year = as.double(gsub("[\\(\\)]", "", regmatches(title, gregexpr("\\(.*?\\)", title))[[1]])))
+
+
+# To find total number of ratings and average movie rating for each movie
+movie_add <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(n_ratings = n(),
+            avg_movie_rating = mean(rating))
+
+
+# To find each user's average given rating
+user_add <- train_set %>% 
+  group_by(userId) %>% 
+  summarize(avg_user_rating = mean(rating))
+
+
+# Find average rating by individual genre and select top 8 highest rated genres
+genre_rating <- train_set %>%
+  mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
+  as_tibble() %>%
+  select(rating, genre_rating) %>%
+  unnest(genre_rating) %>%
+  group_by(genre_rating) %>%
+  summarize(avg_genre_rating = mean(rating)) 
+
+
+genre_add <- left_join(train_set %>%
+                         group_by(movieId) %>% 
+                         mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
+                         as_tibble() %>%
+                         select(movieId, genre_rating) %>%
+                         unnest(genre_rating), 
+                       genre_rating, 
+                       by = "genre_rating") %>%
+  group_by(movieId) %>%
+  summarize(avg_genre_rating = mean(avg_genre_rating)) 
+
+
+# Combine all new fields
+train_set <- left_join(train_set, movie_add, by = "movieId") 
+train_set <- left_join(train_set, user_add, by = "userId")
+train_set <- left_join(train_set, genre_add, by = "movieId") 
+
+
+# Examine correlation of all variables using a corrplot
+# We can see that movie rating, user rating, number of ratings, and number of top genres have the largest positive correlation with rating
+corrplot::corrplot(train_set %>%
+                     select(rating, rating_year, release_year, n_ratings, 
+                            avg_movie_rating, avg_user_rating, avg_genre_rating) %>%
+                     cor(), 
+                   method = "number")
 
 
 # To Do
@@ -159,8 +157,75 @@ train_set <- edx %>% slice(-test_index)
 ### hypothesis = if movie is in a "serious" genre, larger time span for ratings, and has more ratings it is more likely to have higher rating
 # 25 points: RMSE < 0.86490
 
-train_glm <- train(rating ~ factor(genres) + factor(), method = "glm", data = train_set[1:1000,])
-train_glm[["results"]][["RMSE"]]
+
+
+### ACTUAL ###
+
+
+# Method #1: NAIVE MODEL
+# Start off with a naive model that uses the average rating to predict movie ratings
+mu_hat <- mean(train_set$rating)
+naive_rmse <- RMSE(pred = mu_hat,
+                   obs = test_set$rating)
+
+# Method #2: Mean + Average Movie Rating
+# Build a linear model predicting rating from average rating and average movie rating
+bi <- train_set %>%
+  group_by(movieId) %>%
+  summarize(b_i = mean(rating - mu_hat))
+
+pred_bi <- mu_hat + test_set %>%
+  left_join(bi, by = "movieId") %>%
+  pull(b_i)
+
+# Three options for RMSE - caret::RMSE, Metrics::rmse, or by hand and remove NAs
+#RMSE(pred = predicted_ratings, obs = test_set$rating)
+#rmse(actual = test_set$rating, predicted = predicted_ratings)
+model1_rmse <- sqrt(mean((pred_bi-test_set$rating)^2, na.rm = TRUE))
+
+
+# Method #3: Mean + Average Movie Rating + Average User Rating
+bu <- train_set %>%
+  left_join(bi, by = "movieId") %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu_hat - b_i))
+
+pred_bu <- test_set %>%
+  left_join(bi, by = "movieId") %>%
+  left_join(bu, by = "userId") %>%
+  mutate(pred_bu = mu_hat + b_i + b_u) %>%
+  pull(pred_bu)
+
+model2_rmse <- sqrt(mean((pred_bu - test_set$rating)^2, na.rm = TRUE))
+
+# Method #4: Mean + Average Movie Rating + Average User Rating + Average Genre Rating
+
+# DOES NOT WORK # 
+test_set <- left_join(test_set, movie_add, by = "movieId") 
+test_set <- left_join(test_set, user_add, by = "userId")
+test_set <- left_join(test_set, genre_add, by = "movieId") 
+
+lm_fit <- lm(rating ~ avg_movie_rating + avg_user_rating + avg_genre_rating + n_ratings, data = train_set)
+
+predicted_obs <- predict(object = lm_fit,
+                         newdata = test_set %>% 
+                           select(avg_movie_rating, avg_user_rating, avg_genre_rating, n_ratings))
+
+
+sqrt(mean((predicted_obs - test_set$rating)^2, na.rm = TRUE))
+
+
+
+# Build a results table
+results_tbl <- tibble(
+  Method = c("Method #1", "Method #2", "Method #3", "Method #4"),
+  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User", "Mean + Movie + User + Genre"),
+  RMSE = c(naive_rmse, model1_rmse, model2_rmse, model3_rmse))
+
+results_tbl %>%
+  knitr::kable()
+
+
 
 
 ######################
