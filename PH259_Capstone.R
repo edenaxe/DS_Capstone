@@ -87,6 +87,132 @@ train_set <- edx %>% slice(-test_index)
 rm(test_index, edx)
 
 
+### ACTUAL ###
+
+
+# Method #1: NAIVE MODEL
+# Start off with a naive model that uses the average rating to predict movie ratings
+mu_hat <- mean(train_set$rating)
+naive_rmse <- RMSE(pred = mu_hat,
+                   obs = test_set$rating)
+
+# Method #2: Mean + Average Movie Rating
+bi <- train_set %>%
+  group_by(movieId) %>%
+  summarize(b_i = mean(rating - mu_hat))
+
+pred_bi <- mu_hat + test_set %>%
+  left_join(bi, by = "movieId") %>%
+  pull(b_i)
+
+model1_rmse <- RMSE(pred = pred_bi, 
+                    obs = test_set$rating, 
+                    na.rm = TRUE)
+rm(pred_bi)
+
+# Method #3: Mean + Average Movie Rating + Average User Rating
+bu <- train_set %>%
+  left_join(bi, by = "movieId") %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu_hat - b_i))
+
+pred_bu <- test_set %>%
+  left_join(bi, by = "movieId") %>%
+  left_join(bu, by = "userId") %>%
+  mutate(pred_bu = mu_hat + b_i + b_u) %>%
+  pull(pred_bu)
+
+model2_rmse <- RMSE(pred = pred_bu, 
+                    obs = test_set$rating, 
+                    na.rm = TRUE)
+rm(pred_bu)
+
+
+
+# Create and view a summary table
+results_tbl <- tibble(
+  Method = c("Method #1", "Method #2", "Method #3"),
+  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User"),
+  RMSE = c(naive_rmse, model1_rmse, model2_rmse)) %>%
+  mutate(`Estimated Points` = case_when(
+    RMSE >= 0.90000 ~ 5, 
+    RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
+    RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
+    RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
+    RMSE < 0.86490 ~ 25)) %>%
+  knitr::kable()
+
+
+
+# NEXT STEPS - Regularization and Matrix Factorization
+# Look at PH125.8x Section 6: Model Fitting and Recommendation Systems / 6.3: Regularization
+# Text book Regularization chapter https://rafalab.github.io/dsbook/large-datasets.html#regularization
+
+
+### Regularization ###
+
+
+
+### Matrix factorization ###
+
+library(recosystem)
+set.seed(92, sample.kind = "Rounding")
+
+# Convert the train and test sets into recosystem input format
+train_data <-  with(train_set, data_memory(user_index = userId, 
+                                           item_index = movieId,
+                                           rating = rating,
+                                           date = date))
+
+test_data  <-  with(test_set,  data_memory(user_index = userId, 
+                                           item_index = movieId, 
+                                           rating = rating,
+                                           date = date))
+
+validation_data  <-  with(validation,  data_memory(user_index = userId, 
+                                                   item_index = movieId, 
+                                                   rating = rating,
+                                                   date = date))
+
+# Create the model object
+r <-  recosystem::Reco()
+
+# Select the best tuning parameters. I used the parameters that people has been using wirh Reco() examples such as Qiu(2020)
+opts <- r$tune(train_data, 
+               opts = list(dim = c(10, 20, 30),          # dim is number of factors 
+                           lrate = c(0.1, 0.2),          # learning rate
+                           costp_l2 = c(0.01, 0.1),      #regularization for P factors 
+                           costq_l2 = c(0.01, 0.1),      # regularization for  Q factors 
+                           nthread  = 4, niter = 10))    #convergence can be controlled by a number of iterations (niter) and learning rate (lrate)
+
+# Train the algorithm  
+r$train(train_data, opts = c(opts$min, nthread = 4, niter = 20))
+
+
+# Calculate the predicted values using Reco test_data   
+y_hat_reco <-  r$predict(test_data, out_memory())  #out_memory(): Result should be returned as R objects
+
+
+RMSE_reco <- RMSE(test_set$rating, y_hat_reco)
+
+
+# Calculate the predicted values using Reco validation_data  
+v_y_hat_reco <-  r$predict(validation_data, out_memory()) #out_memory(): Result should be returned as R objects
+head(v_y_hat_reco, 10)
+
+v_RMSE_reco <- RMSE(validation$rating, v_y_hat_reco)
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### TEST AREA ###
 
@@ -99,17 +225,19 @@ train_set <- train_set %>%
          release_year = as.double(gsub("[\\(\\)]", "", regmatches(title, gregexpr("\\(.*?\\)", title))[[1]])))
 
 
+# Find average rating for train set
+mu <- mean(train_set$rating)
+
 # To find total number of ratings and average movie rating for each movie
 movie_add <- train_set %>% 
   group_by(movieId) %>% 
-  summarize(n_ratings = n(),
-            avg_movie_rating = mean(rating))
+  summarize(movie_effect = mean(rating - mu))
 
 
 # To find each user's average given rating
 user_add <- train_set %>% 
   group_by(userId) %>% 
-  summarize(avg_user_rating = mean(rating))
+  summarize(user_effect = mean(rating))
 
 
 # Find average rating by individual genre and select top 8 highest rated genres
@@ -135,6 +263,7 @@ genre_add <- left_join(train_set %>%
 
 
 # Combine all new fields
+test_set$mu <- mean(train_set$rating)
 train_set <- left_join(train_set, movie_add, by = "movieId") 
 train_set <- left_join(train_set, user_add, by = "userId")
 train_set <- left_join(train_set, genre_add, by = "movieId") 
@@ -149,81 +278,7 @@ corrplot::corrplot(train_set %>%
                    method = "number")
 
 
-# To Do
-# timestamp to year
-# Extract movie release date - movies with larger rating periods are "classic"
-# genres to seperate columns? to list like starwars tibble? 
-# add column that shows total number of ratings, this can be a metric as well
-### hypothesis = if movie is in a "serious" genre, larger time span for ratings, and has more ratings it is more likely to have higher rating
-# 25 points: RMSE < 0.86490
 
-
-
-### ACTUAL ###
-
-
-# Method #1: NAIVE MODEL
-# Start off with a naive model that uses the average rating to predict movie ratings
-mu_hat <- mean(train_set$rating)
-naive_rmse <- RMSE(pred = mu_hat,
-                   obs = test_set$rating)
-
-# Method #2: Mean + Average Movie Rating
-# Build a linear model predicting rating from average rating and average movie rating
-bi <- train_set %>%
-  group_by(movieId) %>%
-  summarize(b_i = mean(rating - mu_hat))
-
-pred_bi <- mu_hat + test_set %>%
-  left_join(bi, by = "movieId") %>%
-  pull(b_i)
-
-# Three options for RMSE - caret::RMSE, Metrics::rmse, or by hand and remove NAs
-#RMSE(pred = predicted_ratings, obs = test_set$rating)
-#rmse(actual = test_set$rating, predicted = predicted_ratings)
-model1_rmse <- sqrt(mean((pred_bi-test_set$rating)^2, na.rm = TRUE))
-
-
-# Method #3: Mean + Average Movie Rating + Average User Rating
-bu <- train_set %>%
-  left_join(bi, by = "movieId") %>%
-  group_by(userId) %>%
-  summarize(b_u = mean(rating - mu_hat - b_i))
-
-pred_bu <- test_set %>%
-  left_join(bi, by = "movieId") %>%
-  left_join(bu, by = "userId") %>%
-  mutate(pred_bu = mu_hat + b_i + b_u) %>%
-  pull(pred_bu)
-
-model2_rmse <- sqrt(mean((pred_bu - test_set$rating)^2, na.rm = TRUE))
-
-# Method #4: Mean + Average Movie Rating + Average User Rating + Average Genre Rating
-
-# DOES NOT WORK # 
-test_set <- left_join(test_set, movie_add, by = "movieId") 
-test_set <- left_join(test_set, user_add, by = "userId")
-test_set <- left_join(test_set, genre_add, by = "movieId") 
-
-lm_fit <- lm(rating ~ avg_movie_rating + avg_user_rating + avg_genre_rating + n_ratings, data = train_set)
-
-predicted_obs <- predict(object = lm_fit,
-                         newdata = test_set %>% 
-                           select(avg_movie_rating, avg_user_rating, avg_genre_rating, n_ratings))
-
-
-sqrt(mean((predicted_obs - test_set$rating)^2, na.rm = TRUE))
-
-
-
-# Build a results table
-results_tbl <- tibble(
-  Method = c("Method #1", "Method #2", "Method #3", "Method #4"),
-  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User", "Mean + Movie + User + Genre"),
-  RMSE = c(naive_rmse, model1_rmse, model2_rmse, model3_rmse))
-
-results_tbl %>%
-  knitr::kable()
 
 
 
