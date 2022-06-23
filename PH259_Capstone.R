@@ -141,24 +141,17 @@ exp_edx <- left_join(exp_edx, user_add, by = "userId")
 exp_edx <- left_join(exp_edx, genre_add, by = "genres")
 
 
-# View correlation plot
+# View correlation plot for all numeric variables in the exploratory data set
 corrplot::corrplot(exp_edx %>% select_if(., is.numeric) %>% cor(),
                    method = 'circle', order = 'alphabet')
 
 
 # Remove all exploratory data from environment to free up space
 rm(movie_add, user_add, genre_add, genre_list, exp_edx)  
-  
 
 
 
-# Examine correlation of all variables using a corrplot
-# We can see that average movie rating, average user rating, rating month, and number of ratings have the largest positive correlation with rating
-corrplot::corrplot(exp_edx %>%
-                     select(rating, rating_year, rating_month, rating_gap, release_year, 
-                            movie_age, n_ratings, avg_movie_rating, avg_user_rating) %>%
-                     cor())
-
+### Actual Methods ###
 
 # Partition the data in to a test set with 20% and train set with 80%
 # Set seed to 92 for reproducing results  
@@ -167,9 +160,6 @@ test_index <- createDataPartition(edx$rating, times = 1, p = 0.2, list = FALSE)
 test_set <- edx %>% slice(test_index)
 train_set <- edx %>% slice(-test_index)
 rm(test_index, edx)
-
-
-### ACTUAL ###
 
 
 # Method #1: NAIVE MODEL
