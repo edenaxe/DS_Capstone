@@ -128,32 +128,16 @@ model2_rmse <- RMSE(pred = pred_bu,
 rm(pred_bu)
 
 
-
-# Create and view a summary table
-results_tbl <- tibble(
-  Method = c("Method #1", "Method #2", "Method #3"),
-  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User"),
-  RMSE = c(naive_rmse, model1_rmse, model2_rmse)) %>%
-  mutate(`Estimated Points` = case_when(
-    RMSE >= 0.90000 ~ 5, 
-    RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
-    RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
-    RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
-    RMSE < 0.86490 ~ 25)) %>%
-  knitr::kable()
-
-
-
 # NEXT STEPS - Regularization and Matrix Factorization
 # Look at PH125.8x Section 6: Model Fitting and Recommendation Systems / 6.3: Regularization
 # Text book Regularization chapter https://rafalab.github.io/dsbook/large-datasets.html#regularization
 
 
-### Regularization ###
-
-
 
 ### Matrix factorization ###
+
+# Follow general process described in recosystem vignette [https://cran.r-project.org/web/packages/recosystem/vignettes/introduction.html]
+# And https://web.cs.ucdavis.edu/~matloff/matloff/public_html/189/Supplements/Supp02182020.pdf
 
 library(recosystem)
 set.seed(92, sample.kind = "Rounding")
@@ -169,118 +153,33 @@ test_data  <-  with(test_set,  data_memory(user_index = userId,
                                            rating = rating,
                                            date = date))
 
+# Step 1. Create a reference class object using Reco()
+r <-  Reco()
+
+# Skipped Step 2. data tuning because it was taking a long time and we achieved desired results without it
+
+# Step 3. Train the algorithm, UC Davis paper suggest a rank of 20 as a starting point  
+r$train(train_data, opts = list(dim = 20, nmf = TRUE))
+
+# Skipped Step 4. export model via $output()
+
+# Step 5. Calculate the predicted (with $predict()) values using Reco test_data   
+pred_MtrxFct <-  r$predict(test_data, out_memory())  #out_memory(): Result should be returned as R objects
+
+MtrxFct_rmse <- RMSE(test_set$rating, pred_MtrxFct)
+
+
+# Since the matrix factorization gets us where we need to be, repeat the above process but with our validation set
+# Convert the validation set into recosystem input format
 validation_data  <-  with(validation,  data_memory(user_index = userId, 
                                                    item_index = movieId, 
                                                    rating = rating,
                                                    date = date))
 
-# Create the model object
-r <-  recosystem::Reco()
-
-# Select the best tuning parameters. I used the parameters that people has been using wirh Reco() examples such as Qiu(2020)
-opts <- r$tune(train_data, 
-               opts = list(dim = c(10, 20, 30),          # dim is number of factors 
-                           lrate = c(0.1, 0.2),          # learning rate
-                           costp_l2 = c(0.01, 0.1),      #regularization for P factors 
-                           costq_l2 = c(0.01, 0.1),      # regularization for  Q factors 
-                           nthread  = 4, niter = 10))    #convergence can be controlled by a number of iterations (niter) and learning rate (lrate)
-
-# Train the algorithm  
-r$train(train_data, opts = c(opts$min, nthread = 4, niter = 20))
-
-
-# Calculate the predicted values using Reco test_data   
-y_hat_reco <-  r$predict(test_data, out_memory())  #out_memory(): Result should be returned as R objects
-
-
-RMSE_reco <- RMSE(test_set$rating, y_hat_reco)
-
-
 # Calculate the predicted values using Reco validation_data  
-v_y_hat_reco <-  r$predict(validation_data, out_memory()) #out_memory(): Result should be returned as R objects
-head(v_y_hat_reco, 10)
+pred_MtrxFct_Val <- r$predict(validation_data, out_memory()) #out_memory(): Result should be returned as R objects
 
-v_RMSE_reco <- RMSE(validation$rating, v_y_hat_reco)
-
-
-
-
-
-
-
-
-
-
-
-
-
-### TEST AREA ###
-
-
-# Further cleaning on the edx data set, adding variables for creating the model
-train_set <- train_set %>%
-  # Use timestamp column to define the date and year
-  mutate(rating_date = lubridate::as_datetime(timestamp),
-         rating_year = lubridate::year(rating_date), 
-         release_year = as.double(gsub("[\\(\\)]", "", regmatches(title, gregexpr("\\(.*?\\)", title))[[1]])))
-
-
-# Find average rating for train set
-mu <- mean(train_set$rating)
-
-# To find total number of ratings and average movie rating for each movie
-movie_add <- train_set %>% 
-  group_by(movieId) %>% 
-  summarize(movie_effect = mean(rating - mu))
-
-
-# To find each user's average given rating
-user_add <- train_set %>% 
-  group_by(userId) %>% 
-  summarize(user_effect = mean(rating))
-
-
-# Find average rating by individual genre and select top 8 highest rated genres
-genre_rating <- train_set %>%
-  mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
-  as_tibble() %>%
-  select(rating, genre_rating) %>%
-  unnest(genre_rating) %>%
-  group_by(genre_rating) %>%
-  summarize(avg_genre_rating = mean(rating)) 
-
-
-genre_add <- left_join(train_set %>%
-                         group_by(movieId) %>% 
-                         mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
-                         as_tibble() %>%
-                         select(movieId, genre_rating) %>%
-                         unnest(genre_rating), 
-                       genre_rating, 
-                       by = "genre_rating") %>%
-  group_by(movieId) %>%
-  summarize(avg_genre_rating = mean(avg_genre_rating)) 
-
-
-# Combine all new fields
-test_set$mu <- mean(train_set$rating)
-train_set <- left_join(train_set, movie_add, by = "movieId") 
-train_set <- left_join(train_set, user_add, by = "userId")
-train_set <- left_join(train_set, genre_add, by = "movieId") 
-
-
-# Examine correlation of all variables using a corrplot
-# We can see that movie rating, user rating, number of ratings, and number of top genres have the largest positive correlation with rating
-corrplot::corrplot(train_set %>%
-                     select(rating, rating_year, release_year, n_ratings, 
-                            avg_movie_rating, avg_user_rating, avg_genre_rating) %>%
-                     cor(), 
-                   method = "number")
-
-
-
-
-
+MtrxFct_rmse_val <- RMSE(validation$rating, pred_MtrxFct_Val)
 
 
 ######################
@@ -290,6 +189,52 @@ corrplot::corrplot(train_set %>%
 # This section presents the modeling results and discusses the model performance
 
 
+# Create and view a summary table - first 3 models
+results_tbl <- tibble(
+  Method = c("Method #1", "Method #2", "Method #3"),
+  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User"),
+  RMSE = c(naive_rmse, model1_rmse, model2_rmse)) %>%
+  mutate(`Estimated Points` = case_when(
+    RMSE >= 0.90000 ~ 5, 
+    RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
+    RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
+    RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
+    RMSE < 0.86490 ~ 25))
+
+results_tbl %>%
+  knitr::kable()
+
+
+# Redo the results table with matrix factorization 
+results_tbl <- tibble(
+  Method = c("Method #1", "Method #2", "Method #3", "Method #4"),
+  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User", "Matrix Factorization"),
+  RMSE = c(naive_rmse, model1_rmse, model2_rmse, MtrxFct_rmse)) %>%
+  mutate(`Estimated Points` = case_when(
+    RMSE >= 0.90000 ~ 5, 
+    RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
+    RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
+    RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
+    RMSE < 0.86490 ~ 25)) 
+
+results_tbl %>%
+  knitr::kable()
+
+# Final results table with test on validation set
+# Create a gt() version for final table? 
+results_tbl <- tibble(
+  Method = c("Method #1", "Method #2", "Method #3", "Method #4", "Final Validation"),
+  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User", "Matrix Factorization", "Matrix Factorization"),
+  RMSE = c(naive_rmse, model1_rmse, model2_rmse, MtrxFct_rmse, MtrxFct_rmse_val)) %>%
+  mutate(`Estimated Points` = case_when(
+    RMSE >= 0.90000 ~ 5, 
+    RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
+    RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
+    RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
+    RMSE < 0.86490 ~ 25)) 
+
+results_tbl %>%
+  knitr::kable()
 
 
 #########################
