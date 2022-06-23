@@ -77,6 +77,88 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 # This section explains the process and techniques used, including data cleaning, data exploration and visualization, 
 # insights gained, and your modeling approach
 
+# Exploratory analysis
+
+exp_edx <- edx[(sample(nrow(edx), size = 100000)),]
+
+exp_edx %>%
+  mutate(rating_date = lubridate::as_datetime(timestamp),
+         rating_year = lubridate::year(rating_date), 
+         rating_month = lubridate::month(rating_date),
+         release_year = as.double(gsub("[\\(\\)]", "", regmatches(title, gregexpr("\\(.*?\\)", title))[[1]])),
+         rating_gap = rating_year-release_year,
+         movie_age = 2022-release_year)
+
+movie_add <- exp_edx %>% 
+  group_by(movieId) %>% 
+  summarize(n_ratings = n(),
+            avg_movie_rating = mean(rating))
+
+
+# To find each user's average given rating
+user_add <- exp_edx %>% 
+  group_by(userId) %>% 
+  summarize(avg_user_rating = mean(rating))
+
+
+# Find average rating by individual genre and genre combinations
+genre_list <- exp_edx %>%
+  mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
+  as_tibble() %>%
+  select(rating, genre_rating) %>%
+  unnest(genre_rating) %>%
+  group_by(genre_rating) %>%
+  summarize(avg_genre_rating = mean(rating), n = n())
+
+genre_list %>%
+  filter(n > 1000) %>%
+  mutate(genre_rating = fct_reorder(genre_rating, avg_genre_rating)) %>%
+  ggplot(aes(x = avg_genre_rating, y = genre_rating)) +
+  geom_col(fill = "lightblue", alpha = 0.9) +
+  labs(y = "Genre", 
+       x = "Average Rating",
+       title = "Average Rating by Genre",
+       subtitle = "[Genres with > 1,000 Ratings]") +
+  theme_classic() +
+  scale_x_continuous(limits = c(0, 5), 
+                     breaks = 0:5,
+                     labels = 0:5) +
+  theme(panel.grid.major.x = element_line(linetype = "dashed", color = "gray"))
+
+
+genre_add <- cbind.data.frame(id = 1:length(unique(exp_edx$genres)),
+                              genres = unique(exp_edx$genres)) %>%
+  mutate(genre_rating = strsplit(genres, "|", fixed = TRUE)) %>%
+  unnest(genre_rating) %>%
+  inner_join(genre_list, by = "genre_rating") %>%
+  group_by(id, genres) %>%
+  summarize(avg_genre_rating = mean(avg_genre_rating)) 
+
+
+# Combine all new fields
+exp_edx <- left_join(exp_edx, movie_add, by = "movieId") 
+exp_edx <- left_join(exp_edx, user_add, by = "userId")
+exp_edx <- left_join(exp_edx, genre_add, by = "genres")
+
+
+# View correlation plot
+corrplot::corrplot(exp_edx %>% select_if(., is.numeric) %>% cor(),
+                   method = 'circle', order = 'alphabet')
+
+
+# Remove all exploratory data from environment to free up space
+rm(movie_add, user_add, genre_add, genre_list, exp_edx)  
+  
+
+
+
+# Examine correlation of all variables using a corrplot
+# We can see that average movie rating, average user rating, rating month, and number of ratings have the largest positive correlation with rating
+corrplot::corrplot(exp_edx %>%
+                     select(rating, rating_year, rating_month, rating_gap, release_year, 
+                            movie_age, n_ratings, avg_movie_rating, avg_user_rating) %>%
+                     cor())
+
 
 # Partition the data in to a test set with 20% and train set with 80%
 # Set seed to 92 for reproducing results  
