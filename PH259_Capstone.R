@@ -1,14 +1,12 @@
-################################################
-# SECTION 1: Create edx set and validation set #
-################################################
+##### SECTION 1: Setup -----------------------------
+
+# Create edx set and validation set
 
 # Load required packages
-
 library(tidyverse)
 library(caret)
 library(data.table)
-
-
+library(recosystem)
 
 # MovieLens 10M dataset:
 # > https://grouplens.org/datasets/movielens/10m/
@@ -53,35 +51,36 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
 
 
+##### SECTION 2: Introduction / Overview ---------------------------------------
 
 
-######################################
-# SECTION 1: Introduction / Overview #
-######################################
-
-# This section describes the data set and summarizes the goal of the project and key steps that were performed
-
-# Basic premise is to train a machine learning algorithm using the inputs in one subset to predict movie ratings in the validation set
-
-# Basic premise is: 
-# - use my own variables to generate a model on the 
-# - use average movie rating + averag user rating + rating month, 
-# - use Metrics::rmse(validation$rating, predicted values)
-# - adjust until RMSE is below threshold for full points
+# The MovieLens recommendation site was launched in 1997 by GroupLens Research (which is part of the University of Minnesota)
+# Today, the MovieLens database is widely used for research and education purposes
+# In total, there are approximately 11 million ratings and 8,500 movies 
+# Each movie is rated by a user on a scale from 1/2 star up to 5 stars.
 
 
-#################################
-# SECTION 2: Methods / Analysis #
-#################################
+# The goal of this project is to train a machine learning algorithm using the inputs in one subset to predict movie ratings in the validation set
+# The key steps that are performed include: 
+#   Perform exploratory analysis on the data set in order to identify valuable variables
+#   Generate a naive model to define a baseline RMSE and reference point for additional methods
+#   Generate linear models using average movie ratings (movie effects) and average user ratings (user effects)
+#   Utilize matrix factorization to achieve an RMSE below the desired threshold 
+#   Present results and report conclusions
 
-# This section explains the process and techniques used, including data cleaning, data exploration and visualization, 
-# insights gained, and your modeling approach
 
-# Exploratory analysis
 
-exp_edx <- edx[(sample(nrow(edx), size = 100000)),]
+##### SECTION 3: Methods / Analysis --------------------------------------------
 
-exp_edx %>%
+
+# This section explains the process and techniques used, including data cleaning, data exploration and visualization, insights gained, and modeling approach
+
+###### SECTION 3.1 Exploratory Analysis ----------------------------------------
+
+set.seed(92, sample.kind = "Rounding")
+exp_edx <- edx[(sample(nrow(edx), size = 100000)), ]
+
+exp_edx <- exp_edx %>%
   mutate(rating_date = lubridate::as_datetime(timestamp),
          rating_year = lubridate::year(rating_date), 
          rating_month = lubridate::month(rating_date),
@@ -150,8 +149,7 @@ corrplot::corrplot(exp_edx %>% select_if(., is.numeric) %>% cor(),
 rm(movie_add, user_add, genre_add, genre_list, exp_edx)  
 
 
-
-### Actual Methods ###
+###### SECTION 3.2 Actual Methods ----------------------------------------------
 
 # Partition the data in to a test set with 20% and train set with 80%
 # Set seed to 92 for reproducing results  
@@ -159,16 +157,17 @@ set.seed(92, sample.kind = "Rounding")
 test_index <- createDataPartition(edx$rating, times = 1, p = 0.2, list = FALSE)
 test_set <- edx %>% slice(test_index)
 train_set <- edx %>% slice(-test_index)
+
+# Optional: remove edx data set to free up space
 rm(test_index, edx)
 
-
-# Method #1: NAIVE MODEL
+### Method #1: Naive Model
 # Start off with a naive model that uses the average rating to predict movie ratings
 mu_hat <- mean(train_set$rating)
 naive_rmse <- RMSE(pred = mu_hat,
                    obs = test_set$rating)
 
-# Method #2: Mean + Average Movie Rating
+### Method #2: Mean + Average Movie Rating
 bi <- train_set %>%
   group_by(movieId) %>%
   summarize(b_i = mean(rating - mu_hat))
@@ -182,7 +181,7 @@ model1_rmse <- RMSE(pred = pred_bi,
                     na.rm = TRUE)
 rm(pred_bi)
 
-# Method #3: Mean + Average Movie Rating + Average User Rating
+### Method #3: Mean + Average Movie Rating + Average User Rating
 bu <- train_set %>%
   left_join(bi, by = "movieId") %>%
   group_by(userId) %>%
@@ -199,22 +198,13 @@ model2_rmse <- RMSE(pred = pred_bu,
                     na.rm = TRUE)
 rm(pred_bu)
 
+### Method #4: Matrix factorization
 
-# NEXT STEPS - Regularization and Matrix Factorization
-# Look at PH125.8x Section 6: Model Fitting and Recommendation Systems / 6.3: Regularization
-# Text book Regularization chapter https://rafalab.github.io/dsbook/large-datasets.html#regularization
-
-
-
-### Matrix factorization ###
-
-# Follow general process described in recosystem vignette [https://cran.r-project.org/web/packages/recosystem/vignettes/introduction.html]
-# And https://web.cs.ucdavis.edu/~matloff/matloff/public_html/189/Supplements/Supp02182020.pdf
-
-library(recosystem)
-set.seed(92, sample.kind = "Rounding")
+# Followed general process described in recosystem vignette [https://cran.r-project.org/web/packages/recosystem/vignettes/introduction.html]
+# Utilized their 5 main steps but was able to achieve desired RMSE with only required steps and default parameters 
 
 # Convert the train and test sets into recosystem input format
+set.seed(92, sample.kind = "Rounding")
 train_data <-  with(train_set, data_memory(user_index = userId, 
                                            item_index = movieId,
                                            rating = rating,
@@ -230,14 +220,18 @@ r <-  Reco()
 
 # Skipped Step 2. data tuning because it was taking a long time and we achieved desired results without it
 
-# Step 3. Train the algorithm, UC Davis paper suggest a rank of 20 as a starting point  
-r$train(train_data, opts = list(dim = 20, nmf = TRUE))
+# Step 3. Train the algorithm 
+# Desired RMSE was achieved by 3rd iteration using the default options
+# 10 latent factors, regularization parameters for user factors and item factors from 0 (L1) to 0.1 (L2), 20 iterations, and 20 bins
+r$train(train_data)
 
 # Skipped Step 4. export model via $output()
 
-# Step 5. Calculate the predicted (with $predict()) values using Reco test_data   
-pred_MtrxFct <-  r$predict(test_data, out_memory())  #out_memory(): Result should be returned as R objects
+# Step 5. Calculate the predicted values (with $predict()) using Reco test_data, directly return R vector   
+pred_MtrxFct <-  r$predict(test_data, out_memory()) 
+head(pred_MtrxFct, n = 10)
 
+# Find RMSE for matrix factorization predicted output 
 MtrxFct_rmse <- RMSE(test_set$rating, pred_MtrxFct)
 
 
@@ -254,12 +248,10 @@ pred_MtrxFct_Val <- r$predict(validation_data, out_memory()) #out_memory(): Resu
 MtrxFct_rmse_val <- RMSE(validation$rating, pred_MtrxFct_Val)
 
 
-######################
-# SECTION 3: Results #
-######################
+
+##### SECTION 4: Results -------------------------------------------------------
 
 # This section presents the modeling results and discusses the model performance
-
 
 # Create and view a summary table - first 3 models
 results_tbl <- tibble(
@@ -303,14 +295,77 @@ results_tbl <- tibble(
     RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
     RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
     RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
-    RMSE < 0.86490 ~ 25)) 
+    RMSE < 0.86490 ~ 25),
+    `Passes` = case_when(
+      RMSE < 0.86490 ~ 1,
+      TRUE ~ 0
+    )) 
 
+
+# Create a color palette to be used with RMSE column
+pct_pal <- scales::col_numeric(c("#33d44e", "#f0ccb1"), domain = c(naive_rmse, MtrxFct_rmse_val), alpha = 0.6)
+
+# html color and code for check mark
+check <- "<span style=\"color:#33d44e\">&#10004;</span>"
+
+library(gt)
 results_tbl %>%
-  knitr::kable()
+  gt() %>%
+  cols_hide(columns = c(`Estimated Points`)) %>% 
+  tab_style(
+    locations = cells_column_labels(columns = everything()),
+    style = list(cell_text(weight = "bold"))
+  ) %>%
+  # Change font to Franklin Demi 
+  opt_table_font(font = list(
+    google_font("Franklin Demi"), 
+    default_fonts())
+  ) %>%
+  # Set the alignment 
+  cols_align(
+    align = "center",
+    columns = c(3:5)
+  ) %>%
+  # Set the column widths
+  cols_width(
+    columns = 3:5 ~ px(90)
+  ) %>%
+  # Color the Number of Films column
+  data_color(
+    columns = c(RMSE),
+    colors = pct_pal
+  ) %>%
+  # Make the check marks bold
+  tab_style(
+    style = list(cell_text(weight = "bold")),
+    locations = cells_body(columns = 5)
+  ) %>%
+  # Add a title and subtitle
+  tab_header(
+    title = "Final Results for MovieLens Capstone Project"
+  ) %>%
+  # Provide additional cosmetics - border width and color
+  tab_options(
+    column_labels.border.top.width = px(18),
+    column_labels.border.top.color = "white",
+    table.border.top.color = "white",
+    table.border.bottom.color = "white"
+  ) %>%
+  # Use text transform to replace 1s with check marks and 0s with blanks
+  text_transform(
+    locations = cells_body(columns = 5),
+    fn = function(x) {
+      dplyr::case_when(
+        x > 0   ~ paste(check),
+        x == 0  ~ "")
+    }) %>%
+  # Add a source/credit
+  tab_source_note(
+    source_note = md("Table by [Eden Axelrad](https://github.com/edenaxe) 
+                     for Harvard PH259 Capstone, June 2022"))
 
 
-#########################
-# SECTION 4: Conclusion #
-#########################
+
+##### SECTION 5: Conclusion ----------------------------------------------------
 
 # This section gives a brief summary of the report, its limitations and future work
