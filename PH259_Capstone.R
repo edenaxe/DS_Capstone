@@ -7,6 +7,7 @@ library(tidyverse)
 library(caret)
 library(data.table)
 library(recosystem)
+library(gt)
 
 # MovieLens 10M dataset:
 # > https://grouplens.org/datasets/movielens/10m/
@@ -75,7 +76,7 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
 # This section explains the process and techniques used, including data cleaning, data exploration and visualization, insights gained, and modeling approach
 
-###### SECTION 3.1 Exploratory Analysis ----------------------------------------
+###### SECTION 3.1: Exploratory Analysis ----------------------------------------
 
 set.seed(92, sample.kind = "Rounding")
 exp_edx <- edx[(sample(nrow(edx), size = 100000)), ]
@@ -149,7 +150,7 @@ corrplot::corrplot(exp_edx %>% select_if(., is.numeric) %>% cor(),
 rm(movie_add, user_add, genre_add, genre_list, exp_edx)  
 
 
-###### SECTION 3.2 Actual Methods ----------------------------------------------
+###### SECTION 3.2: Actual Methods ----------------------------------------------
 
 # Partition the data in to a test set with 20% and train set with 80%
 # Set seed to 92 for reproducing results  
@@ -296,7 +297,7 @@ results_tbl <- tibble(
     RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
     RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
     RMSE < 0.86490 ~ 25),
-    `Passes` = case_when(
+    `Pass` = case_when(
       RMSE < 0.86490 ~ 1,
       TRUE ~ 0
     )) 
@@ -308,8 +309,9 @@ pct_pal <- scales::col_numeric(c("#33d44e", "#f0ccb1"), domain = c(naive_rmse, M
 # html color and code for check mark
 check <- "<span style=\"color:#33d44e\">&#10004;</span>"
 
-library(gt)
+# Create the final gt table for results
 results_tbl %>%
+  mutate(RMSE = round(RMSE, digits = 5)) %>%
   gt() %>%
   cols_hide(columns = c(`Estimated Points`)) %>% 
   tab_style(
@@ -330,7 +332,7 @@ results_tbl %>%
   cols_width(
     columns = 3:5 ~ px(90)
   ) %>%
-  # Color the Number of Films column
+  # Color the RMSE column
   data_color(
     columns = c(RMSE),
     colors = pct_pal
@@ -369,3 +371,10 @@ results_tbl %>%
 ##### SECTION 5: Conclusion ----------------------------------------------------
 
 # This section gives a brief summary of the report, its limitations and future work
+
+# This Capstone project utilized the MovieLens data set to train and test multiple models and approaches for recommendor systems
+# This project showcases the effects of movies and users on linear models
+# It also showcases the strength of matrix factorization in reducing RMSE
+# The desired RMSE threshold of < 0.86490 was surpassed, and a final validation RMSE of 0.83429 was achieved 
+# For future work, the the matrix factorization model can be further refined with tuning parameters
+# This would result in an optimized model and (likely) lower RMSE 
