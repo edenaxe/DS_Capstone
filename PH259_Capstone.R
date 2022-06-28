@@ -253,40 +253,7 @@ MtrxFct_rmse_val <- RMSE(validation$rating, pred_MtrxFct_Val)
 ##### SECTION 4: Results -------------------------------------------------------
 
 # This section presents the modeling results and discusses the model performance
-
-# Create and view a summary table - first 3 models
-results_tbl <- tibble(
-  Method = c("Method #1", "Method #2", "Method #3"),
-  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User"),
-  RMSE = c(naive_rmse, model1_rmse, model2_rmse)) %>%
-  mutate(`Estimated Points` = case_when(
-    RMSE >= 0.90000 ~ 5, 
-    RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
-    RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
-    RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
-    RMSE < 0.86490 ~ 25))
-
-results_tbl %>%
-  knitr::kable()
-
-
-# Redo the results table with matrix factorization 
-results_tbl <- tibble(
-  Method = c("Method #1", "Method #2", "Method #3", "Method #4"),
-  Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User", "Matrix Factorization"),
-  RMSE = c(naive_rmse, model1_rmse, model2_rmse, MtrxFct_rmse)) %>%
-  mutate(`Estimated Points` = case_when(
-    RMSE >= 0.90000 ~ 5, 
-    RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
-    RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
-    RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
-    RMSE < 0.86490 ~ 25)) 
-
-results_tbl %>%
-  knitr::kable()
-
 # Final results table with test on validation set
-# Create a gt() version for final table? 
 results_tbl <- tibble(
   Method = c("Method #1", "Method #2", "Method #3", "Method #4", "Final Validation"),
   Model = c("Naive Model", "Mean + Movie", "Mean + Movie + User", "Matrix Factorization", "Matrix Factorization"),
@@ -296,76 +263,11 @@ results_tbl <- tibble(
     RMSE >= 0.86550 & RMSE <= 0.89999 ~ 10,
     RMSE >= 0.86500 & RMSE <= 0.86549 ~ 15,
     RMSE >= 0.86490 & RMSE <= 0.86499 ~ 20,
-    RMSE < 0.86490 ~ 25),
-    `Pass` = case_when(
-      RMSE < 0.86490 ~ 1,
-      TRUE ~ 0
-    )) 
+    RMSE < 0.86490 ~ 25))
 
-
-# Create a color palette to be used with RMSE column
-pct_pal <- scales::col_numeric(c("#33d44e", "#f0ccb1"), domain = c(naive_rmse, MtrxFct_rmse_val), alpha = 0.6)
-
-# html color and code for check mark
-check <- "<span style=\"color:#33d44e\">&#10004;</span>"
-
-# Create the final gt table for results
 results_tbl %>%
   mutate(RMSE = round(RMSE, digits = 5)) %>%
-  gt() %>%
-  cols_hide(columns = c(`Estimated Points`)) %>% 
-  tab_style(
-    locations = cells_column_labels(columns = everything()),
-    style = list(cell_text(weight = "bold"))
-  ) %>%
-  # Change font to Franklin Demi 
-  opt_table_font(font = list(
-    google_font("Franklin Demi"), 
-    default_fonts())
-  ) %>%
-  # Set the alignment 
-  cols_align(
-    align = "center",
-    columns = c(3:5)
-  ) %>%
-  # Set the column widths
-  cols_width(
-    columns = 3:5 ~ px(90)
-  ) %>%
-  # Color the RMSE column
-  data_color(
-    columns = c(RMSE),
-    colors = pct_pal
-  ) %>%
-  # Make the check marks bold
-  tab_style(
-    style = list(cell_text(weight = "bold")),
-    locations = cells_body(columns = 5)
-  ) %>%
-  # Add a title and subtitle
-  tab_header(
-    title = "Final Results for MovieLens Capstone Project"
-  ) %>%
-  # Provide additional cosmetics - border width and color
-  tab_options(
-    column_labels.border.top.width = px(18),
-    column_labels.border.top.color = "white",
-    table.border.top.color = "white",
-    table.border.bottom.color = "white"
-  ) %>%
-  # Use text transform to replace 1s with check marks and 0s with blanks
-  text_transform(
-    locations = cells_body(columns = 5),
-    fn = function(x) {
-      dplyr::case_when(
-        x > 0   ~ paste(check),
-        x == 0  ~ "")
-    }) %>%
-  # Add a source/credit
-  tab_source_note(
-    source_note = md("Table by [Eden Axelrad](https://github.com/edenaxe) 
-                     for Harvard PH259 Capstone, June 2022"))
-
+  knitr::kable()
 
 
 ##### SECTION 5: Conclusion ----------------------------------------------------
